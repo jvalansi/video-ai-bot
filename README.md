@@ -109,24 +109,44 @@ This way users need nothing but a phone, and the system stays model-agnostic.
 
 ## Avatar Services (Optional)
 
-These services render a real-time talking avatar from text/audio. They are **not video call platforms** — they generate a video stream that the bot pushes into the Daily.co room as its video track. All three support custom avatars.
+These services render a real-time talking avatar from text/audio. They are **not video call platforms** — they stream avatar video that the bot publishes as its video track.
 
-| | HeyGen | D-ID | Tavus |
-|---|---|---|---|
-| Real-time streaming | Yes | Yes | Yes |
-| Latency | ~1–2s | ~2–3s | ~2s |
-| Avatar quality | Excellent | Good | Excellent |
-| Custom avatar: photo | No | Yes | No |
-| Custom avatar: video | Yes (Instant/Studio) | Yes | Yes (Replica) |
-| Voice cloning | Yes | Yes | Yes (auto from video) |
-| Bring your own LLM | Yes | Yes | Limited |
-| Full conversation loop managed | No | No (yes w/ Agents add-on) | Yes |
-| Flexibility | High | High | Low |
-| Cost | Mid | Mid | High |
-| **Recommended** | **Yes** | — | — |
+> **⚠️ Note:** HeyGen's original Interactive Avatar API is being **sunset on March 31, 2026**. HeyGen has migrated to a new product called [LiveAvatar](https://www.liveavatar.com/). All recommendations below reflect the current landscape.
 
-**HeyGen** is recommended: best quality, lowest latency (~1–2s), real-time streaming API, flexible custom avatar options, and lets you bring your own LLM.
-**Tavus CVI** is an alternative if you want a fully managed conversation loop with less control.
+### WebRTC Platform Dependency
+
+All modern avatar services use **LiveKit** as their WebRTC transport. This has an important architectural implication: if you want a talking avatar, you should **switch from Daily.co to LiveKit** as the WebRTC layer. LiveKit:
+
+- Is open source and free to self-host
+- Has a Python Agents framework purpose-built for voice/video AI bots
+- Supports 11 avatar providers natively via plugins
+- Replaces `daily-python` with equivalent capabilities
+
+The STT (Deepgram), LLM, and TTS (ElevenLabs) modules are all first-class LiveKit Agents plugins — minimal changes needed to the existing pipeline.
+
+### Provider Comparison
+
+| | LiveAvatar (HeyGen) | Tavus | Simli | D-ID |
+|---|---|---|---|---|
+| Real-time streaming | Yes (LiveKit) | Yes (LiveKit) | Yes (LiveKit) | Yes (WebRTC) |
+| Latency | ~1s | ~2s | ~300ms | ~2–3s |
+| Avatar quality | Excellent | Excellent | Good (3D neural) | Good |
+| Custom avatar: photo | No | No | Yes | Yes |
+| Custom avatar: video | Yes (~2 min recording) | Yes (~2 min, Replica) | No | Yes |
+| Voice cloning | Yes | Auto from video | Separate | Yes |
+| Bring your own LLM | Yes (Lite mode) | Limited | Yes | Yes |
+| Bring your own TTS | Yes (Lite mode) | No | Yes | Yes |
+| Bring your own STT | Yes (Lite mode) | No | Yes | Yes |
+| LiveKit Python plugin | Yes | Yes | Yes | No |
+| Flexibility | High | Low | High | High |
+| Cost | Mid | High | Mid | Mid |
+| **Recommended** | **Yes** | — | Alt (lowest latency) | — |
+
+**[LiveAvatar Lite mode](https://docs.liveavatar.com/docs/custom-mode-life-cycle)** is recommended: you keep your own LLM, TTS (ElevenLabs), and STT (Deepgram) — LiveAvatar only handles avatar rendering. Supports custom avatars created from a ~2-minute video recording of yourself.
+
+**[Simli](https://www.simli.com/)** is the best alternative if latency is critical (~300ms vs ~1s): 3D neural face rendering (not video-based lip-sync), accepts a photo to create your avatar face.
+
+**[Tavus](https://www.tavus.io/)** manages the full conversation loop (LLM + TTS included), which is simpler to start but sacrifices control over the AI pipeline.
 
 Without an avatar service, the bot responds with audio only (no video presence) — this is simpler and recommended for a first version.
 
@@ -358,27 +378,48 @@ history.append({"role": "user", "content": [
 
 ### Stage 9 — Talking Avatar (Optional)
 
-Integrate HeyGen's Streaming Avatar API to give the bot a visual presence. The bot streams HeyGen avatar video into the Daily room as its video track.
+> **⚠️ Prerequisite:** This stage requires migrating from Daily.co to **LiveKit** (see Avatar Services section above). All real-time avatar services use LiveKit as their WebRTC transport.
 
-```python
-# Initialize HeyGen streaming session
-heygen_session = requests.post(
-    "https://api.heygen.com/v1/streaming.new",
-    headers={"X-Api-Key": os.getenv("HEYGEN_API_KEY")},
-    json={"quality": "medium", "avatar_name": "your_avatar_id"}
-)
+Give the bot a visual presence using **LiveAvatar Lite mode** (HeyGen's new platform). The bot streams a talking avatar video into the LiveKit room as its video track. In Lite mode, you keep your own LLM, TTS, and STT — LiveAvatar only handles the avatar rendering.
 
-# Send text to animate
-def speak_with_avatar(text):
-    requests.post(
-        "https://api.heygen.com/v1/streaming.task",
-        headers={"X-Api-Key": os.getenv("HEYGEN_API_KEY")},
-        json={"session_id": session_id, "text": text, "task_type": "talk"}
-    )
-    # HeyGen returns a video stream → push into Daily room as bot's video track
+**Step 1 — Create your custom avatar**
+
+Upload a ~2-minute continuous video recording of yourself at [liveavatar.com](https://www.liveavatar.com). LiveAvatar generates a personal avatar that matches your face, expressions, and voice.
+
+**Step 2 — Migrate to LiveKit Agents**
+
+```bash
+pip install livekit-agents livekit-plugins-deepgram livekit-plugins-elevenlabs \
+            livekit-plugins-openai livekit-plugins-anthropic livekit-plugins-liveavatar
 ```
 
-**Outcome:** The bot has a face. Users see a talking avatar that lip-syncs to the LLM's responses.
+**Step 3 — Add avatar to the agent**
+
+```python
+from livekit import agents
+from livekit.agents import AgentSession, AgentServer
+from livekit.plugins import deepgram, elevenlabs, openai, liveavatar
+
+server = AgentServer()
+
+@server.rtc_session(agent_name="video-ai-bot")
+async def my_agent(ctx: agents.JobContext):
+    session = AgentSession(
+        stt=deepgram.STT(),
+        llm=openai.LLM(model="gpt-4o"),   # swap for anthropic.LLM() or google.LLM()
+        tts=elevenlabs.TTS(voice_id="..."),
+    )
+
+    avatar = liveavatar.AvatarSession(
+        api_key=os.getenv("LIVEAVATAR_API_KEY"),
+        avatar_id=os.getenv("LIVEAVATAR_AVATAR_ID"),  # your custom avatar ID
+    )
+
+    await avatar.start(session, room=ctx.room)
+    await session.start(ctx.room, agent=MyAgent())
+```
+
+**Outcome:** The bot has a face. Users see a talking avatar of your custom persona, lip-synced to the LLM's responses, while you retain full control over the AI pipeline.
 
 ---
 
@@ -438,7 +479,11 @@ def twiml():
 | `TWILIO_ACCOUNT_SID` | For outbound calls | Twilio account SID |
 | `TWILIO_AUTH_TOKEN` | For outbound calls | Twilio auth token |
 | `TWILIO_PHONE_NUMBER` | For outbound calls | Twilio phone number |
-| `HEYGEN_API_KEY` | For avatar | HeyGen API key |
+| `LIVEKIT_URL` | For avatar (Stage 9+) | LiveKit server WebSocket URL |
+| `LIVEKIT_API_KEY` | For avatar (Stage 9+) | LiveKit API key |
+| `LIVEKIT_API_SECRET` | For avatar (Stage 9+) | LiveKit API secret |
+| `LIVEAVATAR_API_KEY` | For avatar | LiveAvatar (HeyGen) API key |
+| `LIVEAVATAR_AVATAR_ID` | For avatar | Your custom avatar ID from liveavatar.com |
 | `PUBLIC_URL` | For outbound calls | Publicly accessible server URL |
 
 ---
@@ -451,10 +496,12 @@ video-ai-bot/
 ├── llm.py              # Model-agnostic LLM provider interface
 ├── stt.py              # Deepgram STT streaming
 ├── tts.py              # ElevenLabs TTS
-├── avatar.py           # HeyGen avatar integration (optional)
+├── avatar.py           # LiveAvatar Lite mode integration (optional, requires LiveKit migration)
 ├── twilio_bridge.py    # Twilio PSTN ↔ Daily audio bridge (optional)
 ├── static/
 │   └── index.html      # Browser frontend
 ├── .env.example        # Environment variable template
 └── requirements.txt    # Python dependencies
 ```
+
+> **Note (Stage 9+):** Adding a talking avatar requires migrating from `daily-python` to `livekit-agents`. The `bot.py` and frontend would be replaced; `llm.py`, `stt.py`, and `tts.py` stay largely intact as LiveKit Agents uses the same underlying SDKs.
