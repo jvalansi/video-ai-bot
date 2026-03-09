@@ -72,11 +72,10 @@ class BotParticipant:
     # Audio renderer — called by Daily SDK from its internal thread
     # ------------------------------------------------------------------
 
-    def _on_audio_data(self, participant_id: str, audio_data, num_audio_frames: int):
+    def _on_audio_data(self, participant_id: str, audio_data, audio_source: str):
         """Feed raw PCM bytes from remote participants into Deepgram."""
         if self.stt:
-            # audio_data is a memoryview or bytes-like; convert to bytes
-            self.stt.send(bytes(audio_data))
+            self.stt.send(bytes(audio_data.audio_frames))
 
     # ------------------------------------------------------------------
     # STT transcript handler — called from Deepgram's internal thread
@@ -134,6 +133,14 @@ class BotParticipant:
     # ------------------------------------------------------------------
 
     def run(self):
+        try:
+            self._run()
+        except Exception as e:
+            import traceback
+            print(f"[{self.room_name}] FATAL error in bot thread: {e}", flush=True)
+            traceback.print_exc()
+
+    def _run(self):
         _ensure_daily_init()
 
         from daily import CallClient, VirtualMicrophoneDevice
@@ -147,12 +154,32 @@ class BotParticipant:
         )
 
         # Create Daily client with event handlers
-        self._daily_client = CallClient(
-            event_handler={
-                "on_participant_left": self._on_participant_left,
-                "on_call_state_updated": self._on_call_state_updated,
-            }
-        )
+        from daily import EventHandler
+
+        bot_self = self
+
+        client = self
+
+        class BotEventHandler(EventHandler):
+            def on_participant_joined(self, participant):
+                pid = participant.get("id", "")
+                info = participant.get("info", {})
+                if not info.get("isLocal", False):
+                    print(f"[{client.room_name}] remote participant joined: {pid}, registering audio renderer")
+                    client._daily_client.set_audio_renderer(
+                        pid,
+                        client._on_audio_data,
+                        audio_source="microphone",
+                        sample_rate=client.SAMPLE_RATE,
+                    )
+
+            def on_participant_left(self, participant, reason):
+                client._on_participant_left(participant, reason)
+
+            def on_call_state_updated(self, state):
+                client._on_call_state_updated(state)
+
+        self._daily_client = CallClient(event_handler=BotEventHandler())
 
         # Start Deepgram STT
         self.stt = STTClient(on_transcript=self._on_transcript)
@@ -170,17 +197,6 @@ class BotParticipant:
                     },
                 }
             },
-        )
-
-        # Subscribe to audio from all remote participants
-        self._daily_client.update_subscriptions(
-            all_participants={"media": "audio"}
-        )
-
-        # Register audio renderer (receives remote PCM audio)
-        self._daily_client.set_audio_renderer(
-            self._on_audio_data,
-            audio_source="remote",
         )
 
         print(f"[{self.room_name}] bot joined")

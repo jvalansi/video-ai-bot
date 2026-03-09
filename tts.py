@@ -11,7 +11,7 @@ class TTSClient:
         from elevenlabs.client import ElevenLabs
         self.client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
         self.voice = os.getenv("ELEVENLABS_VOICE_ID", "Rachel")
-        self.model = os.getenv("ELEVENLABS_MODEL", "eleven_monolingual_v1")
+        self.model = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
 
     def synthesize(self, text: str) -> bytes:
         """
@@ -19,10 +19,10 @@ class TTSClient:
         Returns empty bytes on failure.
         """
         try:
-            audio_iter = self.client.generate(
+            audio_iter = self.client.text_to_speech.convert(
+                voice_id=self.voice,
                 text=text,
-                voice=self.voice,
-                model=self.model,
+                model_id=self.model,
                 output_format="pcm_16000",
             )
             return b"".join(audio_iter)

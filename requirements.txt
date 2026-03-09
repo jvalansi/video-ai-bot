@@ -1,5 +1,5 @@
 daily-python
-deepgram-sdk>=3.0.0
+deepgram-sdk>=3.0.0,<4.0.0
 elevenlabs>=1.0.0
 openai>=1.0.0
 anthropic>=0.20.0
