@@ -132,14 +132,18 @@
           endCall();
         });
 
-        await room.connect(url, token, {
-          audio: true,
-          video: false,
-        });
+        await room.connect(url, token);
+
+        // Explicitly enable mic after connecting (required for mobile Safari)
+        setStatus('Requesting microphone…');
+        await room.localParticipant.setMicrophoneEnabled(true);
+
+        const micTrack = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+        const micStatus = micTrack ? '🎤 Mic on' : '🔇 No mic — check browser permissions';
 
         callUi.style.display = 'flex';
         endBtn.style.display = 'block';
-        setStatus('Connected — speak to the AI');
+        setStatus(`Connected — ${micStatus}`);
       } catch (err) {
         setStatus(`Failed: ${err.message}`);
         startBtn.disabled = false;

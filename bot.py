@@ -8,6 +8,7 @@ Endpoints:
 The AI pipeline (STT → LLM → TTS → avatar) runs in a separate process:
     python agent.py dev
 """
+import asyncio
 import os
 import uuid
 from flask import Flask, jsonify, send_from_directory
@@ -29,7 +30,8 @@ def get_token():
     Generate a LiveKit access token for a new room.
     Returns: { token, room, url }
     """
-    from livekit.api import AccessToken, VideoGrants
+    from livekit.api import AccessToken, VideoGrants, LiveKitAPI
+    from livekit.api.agent_dispatch_service import CreateAgentDispatchRequest
 
     room_name = f"room-{uuid.uuid4().hex[:8]}"
 
@@ -43,6 +45,15 @@ def get_token():
         .with_grants(VideoGrants(room_join=True, room=room_name))
         .to_jwt()
     )
+
+    # Dispatch the agent to the room
+    async def _dispatch():
+        async with LiveKitAPI() as lkapi:
+            await lkapi.agent_dispatch.create_dispatch(
+                CreateAgentDispatchRequest(agent_name="video-ai-bot", room=room_name)
+            )
+
+    asyncio.run(_dispatch())
 
     return jsonify({
         "token": token,

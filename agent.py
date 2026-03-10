@@ -56,6 +56,10 @@ server = AgentServer()
 async def session_handler(ctx: agents.JobContext):
     from livekit.plugins import deepgram, elevenlabs
 
+    await ctx.connect()
+    participant = await ctx.wait_for_participant()
+    print(f"[agent] participant joined: {participant.identity}")
+
     session = AgentSession(
         stt=deepgram.STT(
             model="nova-2",
@@ -63,6 +67,7 @@ async def session_handler(ctx: agents.JobContext):
         ),
         llm=_get_llm(),
         tts=elevenlabs.TTS(
+            api_key=os.getenv("ELEVENLABS_API_KEY"),
             voice_id=os.getenv("ELEVENLABS_VOICE_ID", "Rachel"),
             model=os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5"),
         ),
@@ -70,13 +75,17 @@ async def session_handler(ctx: agents.JobContext):
 
     avatar_id = os.getenv("LIVEAVATAR_AVATAR_ID")
     if avatar_id:
-        from livekit.plugins import liveavatar
-        avatar = liveavatar.AvatarSession(avatar_id=avatar_id)
-        await avatar.start(session, room=ctx.room)
-        print(f"[avatar] started avatar session: {avatar_id}")
+        try:
+            from livekit.plugins import liveavatar
+            avatar = liveavatar.AvatarSession(avatar_id=avatar_id)
+            await avatar.start(session, room=ctx.room)
+            print(f"[avatar] started avatar session: {avatar_id}")
+        except Exception as e:
+            print(f"[avatar] failed to start (falling back to audio-only): {e}")
 
-    await session.start(ctx.room, agent=VideoAIBot())
+    await session.start(VideoAIBot(), room=ctx.room)
     print(f"[agent] session started in room: {ctx.room.name}")
+    await session.generate_reply(instructions="Greet the user and let them know you're ready to chat.")
 
 
 if __name__ == "__main__":
