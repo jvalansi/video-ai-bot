@@ -142,7 +142,19 @@ The STT (Deepgram), LLM, and TTS (ElevenLabs) modules are all first-class LiveKi
 | Cost | Mid | High | Mid | Mid |
 | **Recommended** | **Yes** | — | Alt (lowest latency) | — |
 
-**[LiveAvatar Lite mode](https://docs.liveavatar.com/docs/custom-mode-life-cycle)** is recommended: you keep your own LLM, TTS (ElevenLabs), and STT (Deepgram) — LiveAvatar only handles avatar rendering. Supports custom avatars created from a ~2-minute video recording of yourself.
+### LiveAvatar Modes
+
+LiveAvatar supports three modes. The mode affects who handles TTS — and therefore whether the avatar speaks with a generic ElevenLabs voice or its own cloned voice:
+
+| Mode | STT | LLM | TTS | Avatar voice |
+|---|---|---|---|---|
+| **LITE** | You (Deepgram) | You | You (ElevenLabs) | Generic (mismatch) |
+| **FULL** | LiveAvatar | LiveAvatar | LiveAvatar | Cloned ✓ |
+| **CUSTOM** | You (Deepgram) | You | LiveAvatar | Cloned ✓ |
+
+**CUSTOM mode is recommended** for this project: you keep full control of STT and LLM, but LiveAvatar handles TTS using the voice cloned from your avatar's source video. This eliminates the male avatar / female voice mismatch.
+
+**[LiveAvatar Lite mode](https://docs.liveavatar.com/docs/custom-mode-life-cycle)** is the current implementation (Stage 9 below). Simpler to set up but uses ElevenLabs for TTS — voice may not match the avatar.
 
 **[Simli](https://www.simli.com/)** is the best alternative if latency is critical (~300ms vs ~1s): 3D neural face rendering (not video-based lip-sync), accepts a photo to create your avatar face.
 
@@ -423,6 +435,162 @@ async def my_agent(ctx: agents.JobContext):
 
 ---
 
+### Stage 9b — Avatar with Cloned Voice (CUSTOM mode)
+
+> **Prerequisite:** Stage 9 must be complete (LiveKit migration done). This replaces the ElevenLabs TTS plugin with LiveAvatar's built-in cloned voice.
+
+The current Stage 9 (Lite mode) passes ElevenLabs audio to LiveAvatar for lip-sync. This causes a voice/avatar mismatch if the ElevenLabs voice doesn't match the avatar's gender/persona. CUSTOM mode fixes this: LiveAvatar renders TTS using the voice cloned from the avatar's source video.
+
+#### Architecture
+
+```
+User browser ←→ Our LiveKit room (WebRTC)
+                        ↑
+LiveAvatar ─────────────┘  joins our room in CUSTOM mode
+                           publishes: avatar video + cloned-voice audio
+                           subscribes to: agent-control data channel
+
+Our backend (agent.py)
+  ├── subscribes to user audio → Deepgram STT → transcript
+  ├── transcript → LLM → response text
+  └── response text → publishes avatar.speak_text to agent-control data channel
+                           ↑ LiveAvatar receives this and speaks with cloned voice
+```
+
+Key insight: LiveAvatar joins **our** LiveKit room (we provide our own `LIVEKIT_URL` + room credentials). We generate all participant tokens ourselves, so the backend can also join the room with full permissions to publish data channel events.
+
+#### LiveAvatar Event Protocol
+
+Events are exchanged via LiveKit data channels (JSON payloads):
+
+| Direction | Topic | Event type | Payload |
+|---|---|---|---|
+| Backend → LiveAvatar | `agent-control` | `avatar.speak_text` | `{"text": "..."}` |
+| Backend → LiveAvatar | `agent-control` | `avatar.interrupt` | — |
+| Backend → LiveAvatar | `agent-control` | `avatar.start_listening` | — |
+| Backend → LiveAvatar | `agent-control` | `avatar.stop_listening` | — |
+| LiveAvatar → Backend | `agent-response` | `user.transcription` | `{"text": "..."}` |
+| LiveAvatar → Backend | `agent-response` | `avatar.speak_started` | — |
+| LiveAvatar → Backend | `agent-response` | `avatar.speak_ended` | — |
+| LiveAvatar → Backend | `agent-response` | `session.stopped` | `{"end_reason": "..."}` |
+
+> In CUSTOM mode our backend handles STT (Deepgram), so `user.transcription` events from LiveAvatar are not used — we generate our own transcripts.
+
+#### Step 1 — Create LiveAvatar CUSTOM Session (in `bot.py`)
+
+When a new room is created, call the LiveAvatar REST API to create a CUSTOM mode session pointing at our LiveKit room. LiveAvatar will join the room as a participant and publish avatar video + cloned-voice audio.
+
+```python
+import requests
+
+def _liveavatar_join_room(room_name: str):
+    """Tell LiveAvatar to join our LiveKit room in CUSTOM mode."""
+    api_key = os.getenv("LIVEAVATAR_API_KEY")
+    avatar_id = os.getenv("LIVEAVATAR_AVATAR_ID")
+    voice_id = os.getenv("LIVEAVATAR_VOICE_ID")  # cloned voice ID from liveavatar.com
+
+    # Generate a LiveKit token for LiveAvatar to join as a participant
+    from livekit.api import AccessToken, VideoGrants
+    avatar_token = (
+        AccessToken(
+            api_key=os.getenv("LIVEKIT_API_KEY"),
+            api_secret=os.getenv("LIVEKIT_API_SECRET"),
+        )
+        .with_identity("liveavatar-bot")
+        .with_name("Avatar")
+        .with_grants(VideoGrants(room_join=True, room=room_name))
+        .to_jwt()
+    )
+
+    # Step 1: Create session token
+    r = requests.post(
+        "https://api.liveavatar.com/v1/sessions/token",
+        headers={"X-API-KEY": api_key, "Content-Type": "application/json"},
+        json={
+            "mode": "CUSTOM",
+            "avatar_id": avatar_id,
+            "avatar_persona": {"voice_id": voice_id, "language": "en"},
+            "livekit_config": {
+                "url": os.getenv("LIVEKIT_URL"),
+                "room_name": room_name,
+                "token": avatar_token,
+            },
+        },
+    )
+    session = r.json()["data"]
+
+    # Step 2: Start session (LiveAvatar connects to our room)
+    requests.post(
+        "https://api.liveavatar.com/v1/sessions/start",
+        headers={"Authorization": f"Bearer {session['session_token']}"},
+    )
+    return session["session_id"]
+```
+
+Call `_liveavatar_join_room(room_name)` inside `get_token()` after creating the room, before dispatching the agent.
+
+#### Step 2 — Replace ElevenLabs TTS with Data Channel Events (in `agent.py`)
+
+Remove `elevenlabs.TTS` from `AgentSession`. Instead, after the LLM produces a response, publish an `avatar.speak_text` event to the `agent-control` data channel. LiveAvatar receives this and speaks with the cloned voice.
+
+```python
+import json
+from livekit.plugins import deepgram
+
+@server.rtc_session(agent_name="video-ai-bot")
+async def session_handler(ctx: agents.JobContext):
+    await ctx.connect()
+    participant = await ctx.wait_for_participant()
+
+    # No TTS plugin — LiveAvatar handles audio output
+    session = AgentSession(
+        stt=deepgram.STT(model="nova-2", language="en-US"),
+        llm=_get_llm(),
+        # tts= removed; LiveAvatar publishes cloned-voice audio directly
+    )
+
+    # Hook: intercept each reply and forward text to LiveAvatar via data channel
+    @session.on("agent_speech_committed")
+    async def on_speech(ev):
+        payload = json.dumps({
+            "event_type": "avatar.speak_text",
+            "text": ev.text,
+        }).encode()
+        await ctx.room.local_participant.publish_data(
+            payload, topic="agent-control", reliable=True
+        )
+
+    await session.start(VideoAIBot(), room=ctx.room)
+    await session.generate_reply(
+        instructions="Greet the user and let them know you're ready to chat."
+    )
+```
+
+> **Note:** The exact `AgentSession` event name for intercepting committed speech (`agent_speech_committed`) should be verified against the current `livekit-agents` API. Alternatives: subclass `Agent` and override `on_reply`, or use `session.on("agent_reply")`.
+
+#### Step 3 — New Environment Variables
+
+```
+LIVEAVATAR_VOICE_ID=<voice_id>   # cloned voice ID from liveavatar.com/voices
+```
+
+Find your voice ID in the LiveAvatar dashboard after creating your avatar. The avatar creation (~2-min video upload) automatically clones the voice — the resulting voice ID is listed under Voices.
+
+#### Step 4 — Remove ElevenLabs Dependency
+
+```bash
+pip uninstall livekit-plugins-elevenlabs
+# remove from requirements.txt
+```
+
+Remove `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL` from `.env`.
+
+#### Outcome
+
+The avatar speaks with the voice cloned from your source video. No ElevenLabs dependency. Voice and face match by construction.
+
+---
+
 ### Stage 10 — Outbound Calls via Twilio (Optional)
 
 Dial a user's phone number via Twilio and bridge the call into a Daily.co room. The same STT → LLM → TTS pipeline handles the call.
@@ -484,6 +652,7 @@ def twiml():
 | `LIVEKIT_API_SECRET` | For avatar (Stage 9+) | LiveKit API secret |
 | `LIVEAVATAR_API_KEY` | For avatar | LiveAvatar (HeyGen) API key |
 | `LIVEAVATAR_AVATAR_ID` | For avatar | Your custom avatar ID from liveavatar.com |
+| `LIVEAVATAR_VOICE_ID` | For Stage 9b (CUSTOM mode) | Cloned voice ID from liveavatar.com/voices |
 | `PUBLIC_URL` | For outbound calls | Publicly accessible server URL |
 
 ---
