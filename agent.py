@@ -109,7 +109,7 @@ async def session_handler(ctx: agents.JobContext):
             llm=_get_llm(),
             tts=elevenlabs.TTS(
                 api_key=os.getenv("ELEVENLABS_API_KEY"),
-                voice_id=os.getenv("ELEVENLABS_VOICE_ID", "Rachel"),
+                voice_id=os.getenv("ELEVENLABS_VOICE_ID", "Adam"),
                 model=os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5"),
             ),
         )
