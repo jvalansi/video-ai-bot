@@ -68,12 +68,33 @@ def _is_custom_mode() -> bool:
     return bool(os.getenv("LIVEAVATAR_API_KEY") and os.getenv("LIVEAVATAR_VOICE_ID"))
 
 
+async def _wait_for_human_participant(ctx: agents.JobContext):
+    """Return the first non-avatar remote participant."""
+    import asyncio
+    # Check already-present participants first
+    for p in ctx.room.remote_participants.values():
+        if p.identity != "liveavatar-bot":
+            return p
+    # None found yet — wait for one to arrive
+    fut: asyncio.Future = asyncio.get_event_loop().create_future()
+
+    def _on_connected(p):
+        if p.identity != "liveavatar-bot" and not fut.done():
+            fut.set_result(p)
+
+    ctx.room.on("participant_connected", _on_connected)
+    try:
+        return await fut
+    finally:
+        ctx.room.off("participant_connected", _on_connected)
+
+
 @server.rtc_session(agent_name="video-ai-bot")
 async def session_handler(ctx: agents.JobContext):
     from livekit.plugins import deepgram
 
     await ctx.connect()
-    participant = await ctx.wait_for_participant()
+    participant = await _wait_for_human_participant(ctx)
     print(f"[agent] participant joined: {participant.identity}")
 
     if _is_custom_mode():
