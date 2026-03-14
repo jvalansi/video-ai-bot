@@ -49,9 +49,9 @@ def _liveavatar_join_room(room_name: str) -> str | None:
         "mode": "CUSTOM",
         "avatar_id": avatar_id,
         "livekit_config": {
-            "url": os.getenv("LIVEKIT_URL"),
-            "room_name": room_name,
-            "token": avatar_token,
+            "livekit_url": os.getenv("LIVEKIT_URL"),
+            "livekit_room": room_name,
+            "livekit_client_token": avatar_token,
         },
     }
     voice_id = os.getenv("LIVEAVATAR_VOICE_ID")
