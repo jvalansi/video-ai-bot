@@ -28,7 +28,8 @@ def _liveavatar_join_room(room_name: str) -> str | None:
     """
     api_key = os.getenv("LIVEAVATAR_API_KEY")
     avatar_id = os.getenv("LIVEAVATAR_AVATAR_ID")
-    if not api_key or not avatar_id:
+    voice_id = os.getenv("LIVEAVATAR_VOICE_ID")
+    if not api_key or not avatar_id or not voice_id:
         return None
 
     from livekit.api import AccessToken, VideoGrants
@@ -54,7 +55,6 @@ def _liveavatar_join_room(room_name: str) -> str | None:
             "livekit_client_token": avatar_token,
         },
     }
-    voice_id = os.getenv("LIVEAVATAR_VOICE_ID")
     if voice_id:
         payload["avatar_persona"] = {"voice_id": voice_id, "language": "en"}
 
