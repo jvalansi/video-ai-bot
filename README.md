@@ -48,6 +48,23 @@ Open `http://localhost:5000`, click **Start Call**.
 
 ---
 
+## Roadmap to Profitability
+
+**Current state:** Working prototype — local dev, no billing, single user.
+
+| Milestone | Description | Expected Monthly ROI |
+|---|---|---|
+| **Hosted deployment** | Deploy to public URL, stable infra | — |
+| **Customer onboarding** | Sign-up, provision a video call room per customer | — |
+| **Billing** | Per-minute or subscription ($30–100/mo) | $150–500/mo (5–10 customers) |
+| **Avatar quality** | LiveAvatar / HeyGen cloned voice for premium feel | higher conversion |
+| **B2B vertical** | Target customer service, coaching, tutoring use cases | $500–2k/mo/client |
+| **White-label API** | Let developers embed video AI in their own products | enterprise tier |
+
+**Next step (Notion task):** Deploy to production + add Stripe billing — ROI hypothesis $150/mo from first 5 paying customers.
+
+---
+
 ## Project Structure
 
 ```
