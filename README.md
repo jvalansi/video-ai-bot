@@ -63,6 +63,8 @@ Open `http://localhost:5000`, click **Start Call**.
 
 **Next step (Notion task):** Deploy to production + add Stripe billing — ROI hypothesis $150/mo from first 5 paying customers.
 
+**Notion project page:** [video-ai-bot — Strategy & Profitability](https://www.notion.so/video-ai-bot-Strategy-Profitability-32505a1b5e0181d49f16d4cd5d209b47)
+
 ---
 
 ## Project Structure
