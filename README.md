@@ -50,18 +50,18 @@ Open `http://localhost:5000`, click **Start Call**.
 
 ## Roadmap to Profitability
 
-**Current state:** Working prototype — local dev, no billing, single user.
+**The idea:** A platform to create interactive AI avatars of real people — using their voice, likeness, and knowledge. Two core use cases:
+- **Personal:** simulate a deceased parent or loved one so family can still "talk" to them
+- **Public figures:** talk to Einstein, Kim Kardashian, historical leaders — Wikipedia + recordings ingested as context
 
 | Milestone | Description | Expected Monthly ROI |
 |---|---|---|
-| **Hosted deployment** | Deploy to public URL, stable infra | — |
-| **Customer onboarding** | Sign-up, provision a video call room per customer | — |
-| **Billing** | Per-minute or subscription ($30–100/mo) | $150–500/mo (5–10 customers) |
-| **Avatar quality** | LiveAvatar / HeyGen cloned voice for premium feel | higher conversion |
-| **B2B vertical** | Target customer service, coaching, tutoring use cases | $500–2k/mo/client |
-| **White-label API** | Let developers embed video AI in their own products | enterprise tier |
+| **Public figure MVP** | Einstein demo: Wikipedia RAG + voice clone + avatar, shareable link | viral/demo |
+| **Freemium launch** | Free (limited public figures) + $20–50/mo personal tier | $200–500/mo |
+| **Personal tier** | Upload recordings/photos of a loved one, build private avatar | high emotional value |
+| **Viral loop** | Shareable conversation clips, social hooks | organic growth |
 
-**Next step (Notion task):** Deploy to production + add Stripe billing — ROI hypothesis $150/mo from first 5 paying customers.
+**Next step (Notion task):** Build Einstein demo — ingest Wikipedia as RAG context, clone voice from archive recordings, ship as a shareable link.
 
 **Notion project page:** [video-ai-bot — Strategy & Profitability](https://www.notion.so/video-ai-bot-Strategy-Profitability-32505a1b5e01818795b3e24dca1066da)
 
